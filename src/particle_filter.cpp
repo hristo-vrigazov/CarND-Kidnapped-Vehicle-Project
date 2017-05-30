@@ -64,7 +64,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
   }
 }
 
-int find_closest(const vector<LandmarkObs> &predicted, LandmarkObs &obs) {
+int findClosest(const vector<LandmarkObs> &predicted, LandmarkObs &obs) {
   double closest_dist = INFINITY;
   int id_of_closest;
   for (auto& pred: predicted) {
@@ -83,9 +83,49 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
 	//   observed measurement to this particular landmark.
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
-  for (auto& obs: observations) {
-    obs.id = find_closest(predicted, obs);
+  for (LandmarkObs& obs: observations) {
+    obs.id = findClosest(predicted, obs);
   }
+}
+
+vector<LandmarkObs> getProcessedObservations(Particle &particle, vector<LandmarkObs> observations) {
+  vector<LandmarkObs> processed_observations;
+  for (LandmarkObs& obs: observations) {
+    double cosTheta = cos(particle.theta);
+    double sinTheta = sin(particle.theta);
+    double xt = particle.x + obs.x * cosTheta - obs.y * sinTheta;
+    double yt = particle.y + obs.x * sinTheta + obs.y * cosTheta;
+    LandmarkObs observation = { -1, xt, yt };
+    processed_observations.push_back(observation);
+  }
+
+  return processed_observations;
+}
+
+vector<LandmarkObs> getLandmarksInRange(double sensor_range, Particle & particle, Map map_landmarks) {
+  vector<LandmarkObs> landmarkInRange;
+  int id = 0;
+  for (Map::single_landmark_s& singleLandmark: map_landmarks.landmark_list) {
+    if (dist(singleLandmark.x_f, singleLandmark.y_f, particle.x, particle.y) <= sensor_range) {
+      LandmarkObs landmark = { id++, singleLandmark.x_f, singleLandmark.y_f };
+      landmarkInRange.push_back(landmark);
+    }
+  }
+
+  return landmarkInRange;
+}
+
+double getWeight(Particle & particle, vector<LandmarkObs> car_observations, vector<LandmarkObs> landmarkInRange, double std_landmark[]) {
+  double weight = 1.0;
+  for (LandmarkObs& obs: car_observations) {
+    LandmarkObs land_obs = landmarkInRange[obs.id];
+    double p_x = pow(obs.x - land_obs.x, 2) / (2 * pow(std_landmark[0], 2));
+    double p_y = pow(obs.y - land_obs.y, 2) / (2 * pow(std_landmark[1], 2));
+    double power = -1.0 * (p_x + p_y);
+    weight *= exp(power);
+  }
+
+  particle.weight = weight;
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
@@ -101,13 +141,39 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   3.33. Note that you'll need to switch the minus sign in that equation to a plus to account 
 	//   for the fact that the map's y-axis actually points downwards.)
 	//   http://planning.cs.uiuc.edu/node99.html
+
+  double sum_w = 0.0;
+
+  for (Particle& particle: particles) {
+    // process observations so that they are easier to search
+    vector<LandmarkObs> processedObservations = getProcessedObservations(particle, observations);
+    vector<LandmarkObs> landmarkInRange = getLandmarksInRange(sensor_range, particle, map_landmarks);
+
+    // for debugging purposes
+    dataAssociation(landmarkInRange, processedObservations);
+    // accumulate weight
+    sum_w += getWeight(particle, processedObservations, landmarkInRange, std_landmark);
+  }
+
+  // update weights and particles
+  for (int i = 0; i < num_particles; i++) {
+    particles[i].weight /= sum_w * 2 * M_PI * std_landmark[0] * std_landmark[1];
+    weights[i] = particles[i].weight;
+  }
 }
 
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+  discrete_distribution<int> distribution(weights.begin(), weights.end());
 
+  std::vector<Particle> new_particles;
+  for (int i = 0; i < num_particles; i++) {
+    new_particles.push_back(particles[distribution(gen)]);
+  }
+
+  particles = new_particles;
 }
 
 void ParticleFilter::write(std::string filename) {
