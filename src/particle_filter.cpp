@@ -14,13 +14,13 @@
 
 using namespace std;
 
+default_random_engine gen;
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
-
-  default_random_engine gen;
 
   num_particles = 100;
 
@@ -47,7 +47,21 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	// NOTE: When adding noise you may find std::normal_distribution and std::default_random_engine useful.
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
+  double vel_yaw = velocity / yaw_rate;
 
+  for (Particle& particle: particles) {
+    double theta = particle.theta + yaw_rate * delta_t;
+    double x = particle.x + vel_yaw * (sin(theta) - sin(particle.theta));
+    double y = particle.y + vel_yaw * (cos(particle.theta) - cos(theta));
+
+    normal_distribution<double> dist_x(x, std_pos[0]);
+    normal_distribution<double> dist_y(y, std_pos[1]);
+    normal_distribution<double> dist_theta(theta, std_pos[2]);
+
+    particle.x = dist_x(gen);
+    particle.y = dist_y(gen);
+    particle.theta = dist_theta(gen);
+  }
 }
 
 void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations) {
